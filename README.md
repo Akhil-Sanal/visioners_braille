@@ -1,1 +1,391 @@
-visioners
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Visioners – Image to Braille (Voice & Text + Camera)</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<style>
+body{
+  font-family: 'Segoe UI', Arial, sans-serif;
+  background:#f5f7fb;
+  padding:20px;
+  display: flex;
+  justify-content: center;
+}
+.card{
+  width: 100%;
+  max-width:800px;
+  background:#fff;
+  padding:25px;
+  border-radius:16px;
+  box-shadow:0 10px 25px rgba(0,0,0,0.08);
+}
+h2 { margin-top: 0; color: #1e293b; }
+
+.drop{
+  border:3px dashed #cbd5e1;
+  padding:30px;
+  text-align:center;
+  border-radius:12px;
+  cursor:pointer;
+  transition: all 0.2s;
+  background: #f8fafc;
+  color: #64748b;
+}
+.drop:hover, .drop:focus { background: #eef2ff; border-color: #2b6ef6; outline: none; color: #2b6ef6; }
+input[type=file]{display:none;}
+
+.row{display:flex; gap:20px; margin-top:20px; flex-wrap:wrap;}
+.left{max-width:300px; width:100%;}
+img{max-width:100%; display:none; border-radius:8px; margin-bottom:10px; border: 1px solid #e2e8f0;}
+
+/* Button Styles */
+button{
+  padding:12px 18px;
+  border:none;
+  border-radius:8px;
+  background:#2b6ef6;
+  color:#fff;
+  cursor:pointer;
+  margin-top:10px;
+  font-weight: 600;
+  font-size: 14px;
+  transition: opacity 0.2s;
+}
+button:disabled{opacity:0.5; cursor:not-allowed;}
+button:hover:not(:disabled) { opacity: 0.9; }
+
+#printBtn{background:#f97316;} /* Orange */
+#readBtn{background:#10b981; margin-left: 10px;} /* Green */
+#cameraBtn{background:#8b5cf6; width:100%; margin-top:5px;} /* Purple */
+
+/* Text Area Styles */
+textarea {
+  width: 100%;
+  height: 200px;
+  background:#1e293b;
+  color:#e2e8f0;
+  padding:15px;
+  border-radius:8px;
+  border: none;
+  font-family: monospace;
+  font-size: 14px;
+  line-height: 1.5;
+  resize: vertical;
+  box-sizing: border-box;
+}
+textarea:focus { outline: 2px solid #2b6ef6; }
+
+.status{margin-top:8px;font-size:13px; color:#64748b; font-weight: 500;}
+
+/* camera preview modal-like */
+.camera-section {
+  margin-top: 12px;
+  background:#f1f4f9;
+  border-radius:12px;
+  padding:15px;
+  display: none;
+}
+.camera-section video, .camera-section canvas {
+  width:100%;
+  max-height:200px;
+  border-radius:10px;
+  background:#000;
+}
+.camera-actions {
+  display:flex;
+  gap:10px;
+  margin-top:10px;
+  flex-wrap:wrap;
+}
+.camera-actions button {
+  flex:1;
+  margin-top:0;
+  background:#475569;
+}
+#captureBtn { background:#2b6ef6; }
+#cancelCameraBtn { background:#ef4444; }
+</style>
+</head>
+
+<body>
+
+<div class="card">
+  <h2>📸 Image → Braille & Speech (with Camera)</h2>
+  
+  <div class="drop" id="dropZone" tabindex="0" role="button" aria-label="Upload Image Area">
+    <span style="font-size: 24px;">📂</span><br>
+    <b>Click to Upload Image</b>
+    <br><small>(or tap camera button below)</small>
+    <input id="fileInput" type="file" accept="image/png,image/jpeg">
+  </div>
+
+  <!-- Camera controls row (new) -->
+  <button id="cameraBtn" style="width:100%; margin-top:12px;">📷 Open Camera / Take Picture</button>
+
+  <!-- Hidden camera preview panel -->
+  <div class="camera-section" id="cameraSection">
+    <video id="video" autoplay playsinline></video>
+    <canvas id="canvas" style="display:none;"></canvas>
+    <div class="camera-actions">
+      <button id="captureBtn">📸 Capture Photo</button>
+      <button id="cancelCameraBtn">✖ Cancel</button>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="left">
+      <img id="preview" alt="Uploaded Image Preview">
+      <div class="status" id="status" aria-live="polite">Ready. Upload, type or use camera.</div>
+      <button id="ocrBtn" style="width:100%" disabled>🔍 Extract Text from Image</button>
+    </div>
+
+    <div style="flex:1;">
+      <label for="output" style="font-size:12px; font-weight:bold; color:#475569; display:block; margin-bottom:5px;">TEXT TO PRINT (You can edit this):</label>
+      
+      <textarea id="output" placeholder="Type here or capture image to extract text..."></textarea>
+      
+      <div style="display:flex; align-items:center; margin-top:10px;">
+        <button id="printBtn">🖨️ Print to Braille</button>
+        <button id="readBtn" title="Read text out loud">🔊 Read Aloud</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+
+  const OCR_API_KEY = "K83796517488957"; // OCR.space Free Key
+
+  const dropZone = document.getElementById("dropZone");
+  const fileInput = document.getElementById("fileInput");
+  const preview = document.getElementById("preview");
+  const statusEl = document.getElementById("status");
+  const ocrBtn = document.getElementById("ocrBtn");
+  const output = document.getElementById("output");
+  const printBtn = document.getElementById("printBtn");
+  const readBtn = document.getElementById("readBtn");
+
+  // camera elements
+  const cameraBtn = document.getElementById("cameraBtn");
+  const cameraSection = document.getElementById("cameraSection");
+  const video = document.getElementById("video");
+  const canvas = document.getElementById("canvas");
+  const captureBtn = document.getElementById("captureBtn");
+  const cancelCameraBtn = document.getElementById("cancelCameraBtn");
+
+  let imageDataUrl = null;
+  let mediaStream = null;
+
+  // --- 🗣️ SPEECH FUNCTION ---
+  function speak(text) {
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = 'en-US'; 
+    window.speechSynthesis.speak(utterance);
+  }
+
+  function setStatus(msg){ statusEl.textContent = msg; }
+
+  // --- stop camera stream helper ---
+  function stopCameraStream() {
+    if (mediaStream) {
+      mediaStream.getTracks().forEach(track => track.stop());
+      mediaStream = null;
+    }
+    video.srcObject = null;
+  }
+
+  // --- hide camera UI and clean up ---
+  function closeCameraUI() {
+    cameraSection.style.display = 'none';
+    stopCameraStream();
+  }
+
+  // --- Upload Logic ---
+  dropZone.onclick = () => { 
+    fileInput.value = ""; 
+    fileInput.click(); 
+    closeCameraUI(); // close camera if open
+  };
+  dropZone.onkeypress = (e) => { if(e.key === 'Enter') { fileInput.click(); } };
+
+  fileInput.onchange = () => {
+    const file = fileInput.files[0];
+    if(!file) return;
+
+    if(!file.type.startsWith("image/")){
+      alert("Please select a valid image file."); return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      imageDataUrl = reader.result;
+      preview.src = imageDataUrl;
+      preview.style.display = "block";
+      
+      const msg = "Image loaded. Ready to scan.";
+      setStatus(msg);
+      speak(msg);
+
+      ocrBtn.disabled = false;
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // --- open camera ---
+  cameraBtn.onclick = async () => {
+    // hide upload preview maybe, but keep it simple: show camera panel
+    cameraSection.style.display = 'block';
+    // stop any existing stream
+    stopCameraStream();
+    try {
+      mediaStream = await navigator.mediaDevices.getUserMedia({ video: true });
+      video.srcObject = mediaStream;
+    } catch (err) {
+      alert('Camera not available: ' + err.message);
+      closeCameraUI();
+    }
+  };
+
+  // --- capture photo from camera ---
+  captureBtn.onclick = () => {
+    if (!mediaStream) return;
+
+    // set canvas same as video size
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const context = canvas.getContext('2d');
+    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    // convert to dataURL
+    imageDataUrl = canvas.toDataURL('image/png');
+    
+    // show preview
+    preview.src = imageDataUrl;
+    preview.style.display = "block";
+
+    // set fileInput empty (simulate fresh capture)
+    fileInput.value = '';
+
+    // update status
+    const msg = "Photo captured from camera. Ready to scan.";
+    setStatus(msg);
+    speak(msg);
+    ocrBtn.disabled = false;
+
+    // close camera panel
+    closeCameraUI();
+  };
+
+  // --- cancel camera ---
+  cancelCameraBtn.onclick = () => {
+    closeCameraUI();
+  };
+
+  // --- OCR Logic (same, works with imageDataUrl) ---
+  ocrBtn.onclick = async () => {
+    if (!imageDataUrl) {
+      alert('No image. Please upload or capture one.');
+      return;
+    }
+    const msg = "Scanning image...";
+    setStatus(msg);
+    speak(msg);
+    
+    ocrBtn.disabled = true;
+    output.value = "Scanning... please wait...";
+
+    try{
+      const res1 = await fetch(imageDataUrl);
+      const blob = await res1.blob();
+      const formData = new FormData();
+      formData.append("file", blob, "image.png");
+      formData.append("apikey", OCR_API_KEY);
+      formData.append("language", "eng");
+      formData.append("OCREngine", "2");
+
+      const res = await fetch("https://api.ocr.space/parse/image", {
+        method: "POST", body: formData
+      });
+
+      const data = await res.json();
+
+      if(data.IsErroredOnProcessing){ throw new Error(data.ErrorMessage); }
+
+      let text = data.ParsedResults?.[0]?.ParsedText || "";
+      text = text.trim();
+
+      if(!text) {
+        output.value = "";
+        output.placeholder = "No text found in image.";
+        setStatus("No text found.");
+        speak("I could not find any text.");
+      } else {
+        output.value = text;
+        const successMsg = "Text extracted.";
+        setStatus(successMsg);
+        speak(successMsg + " You can edit it now.");
+      }
+
+    }catch(err){
+      console.error(err);
+      output.value = "Error during scan.";
+      setStatus("Scan failed.");
+      speak("Scanning failed.");
+    }
+    ocrBtn.disabled = false;
+  };
+
+  // --- 🔊 Read Aloud Logic ---
+  readBtn.onclick = () => {
+    const text = output.value;
+    if(text.trim()) {
+      speak(text);
+    } else {
+      speak("The text box is empty.");
+    }
+  };
+
+  // --- Print Logic ---
+  printBtn.onclick = () => {
+    const text = output.value;
+    
+    if(!text.trim()) {
+        alert("Please type some text or scan an image first.");
+        speak("Please enter some text first.");
+        return;
+    }
+
+    if(!confirm("Are you connected to 'JUST_Braille_Printer' WiFi?")) return;
+
+    speak("Sending to printer.");
+    setStatus("Sending...");
+
+    fetch("http://192.168.4.1/print?text=" + encodeURIComponent(text), { mode: 'no-cors' })
+      .then(() => {
+        const doneMsg = "Sent to Braille printer.";
+        setStatus(doneMsg);
+        speak(doneMsg);
+        alert("✅ " + doneMsg);
+      })
+      .catch(() => {
+        const failMsg = "Connection failed. Check WiFi.";
+        setStatus(failMsg);
+        speak(failMsg);
+        alert("❌ " + failMsg);
+      });
+  };
+
+  // clean up camera if user clicks away (optional, but good)
+  window.addEventListener('beforeunload', () => {
+    stopCameraStream();
+  });
+
+});
+</script>
+
+</body>
+</html>
